@@ -1,2 +1,2 @@
 - ffmpeg needed
-- releases include ffmpeg on the exe file
+- releases include ffmpeg in the exe file
