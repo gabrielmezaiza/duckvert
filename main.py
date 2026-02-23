@@ -1,7 +1,6 @@
 import os
 import subprocess
 import time
-import datetime
 import threading
 import customtkinter as ctk
 from tkinter import filedialog, messagebox
@@ -17,47 +16,23 @@ def resource_path(relative_path):
     return os.path.join(os.path.abspath("."), relative_path)
 
 ffmpeg_bin = resource_path("ffmpeg.exe")
-
 AUDIO_FILE_TYPES = ("flac", "aac", "aiff", "m4a", "ogg", "opus", "raw", "wav", "wma", "webm")
 
-FORMAT_CONFIG = {
-    "MP3": {
-        "ext": "mp3", 
-        "args": [
-            "-codec:a", "libmp3lame", "-q:a", "3",
-            "-map_metadata", "0",     
-            "-id3v2_version", "3",       
-            "-c:v", "copy",              
-            "-map", "0:a",                
-            "-map", "0:v?"               
-        ]
-    },
-    "ALAC": {
-        "ext": "m4a", 
-        "args": [
-            "-codec:a", "alac", 
-            "-map_metadata", "0", 
-            "-c:v", "copy", 
-            "-disposition:v", "attached_pic",
-            "-map", "0:a",
-            "-map", "0:v?"
-        ]
-    },
-    "FLAC": {
-        "ext": "flac", 
-        "args": [
-            "-codec:a", "flac",
-            "-map", "0:a",
-            "-map", "0:v?"
-        ]
-    }
+MP3_BITRATES = {
+    "VBR (Standard)": ["-q:a", "3"],
+    "VBR (High)": ["-q:a", "0"],
+    "320 kbps": ["-b:a", "320k"],
+    "256 kbps": ["-b:a", "256k"],
+    "192 kbps": ["-b:a", "192k"]
 }
 
 def converttomp3(task):
-    full_path_source, full_path_dest, ffmpeg_params = task
+    full_path_source, full_path_dest, ffmpeg_params, use_max_cpu = task
     os.makedirs(os.path.dirname(full_path_dest), exist_ok=True)
     
-    command = [ffmpeg_bin, "-loglevel", "quiet", "-hide_banner", "-y", "-i", full_path_source]
+    thread_limit = ["-threads", "0" if use_max_cpu else "1"]
+    
+    command = [ffmpeg_bin, "-loglevel", "quiet", "-hide_banner", "-y"] + thread_limit + ["-i", full_path_source]
     command += ffmpeg_params
     command.append(full_path_dest)
 
@@ -76,9 +51,8 @@ class DuckvertGUI(ctk.CTk):
 
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("dark-blue") 
-
         self.title("Duckvert (Alpha)")
-        self.geometry("600x450")
+        self.geometry("600x520") 
 
         try:
             self.iconbitmap(resource_path("pato.ico"))
@@ -88,32 +62,46 @@ class DuckvertGUI(ctk.CTk):
         self.source_path = ctk.StringVar()
         self.dest_path = ctk.StringVar()
         self.format_var = ctk.StringVar(value="MP3")
+        self.bitrate_var = ctk.StringVar(value="VBR (Standard)")
+        self.cpu_mode = ctk.StringVar(value="Normal")
 
         self.grid_columnconfigure(0, weight=1)
 
         ctk.CTkLabel(self, text="Duckvert converter", font=("Arial", 20, "bold")).grid(row=0, column=0, pady=20)
 
-        color_gris_boton = ("#3d3d3d", "#2b2b2b")
-        color_gris_hover = ("#555555", "#404040")
+        self.color_gris_boton = ("#3d3d3d", "#2b2b2b")
+        self.color_gris_hover = ("#555555", "#404040")
 
         self.frame_src = ctk.CTkFrame(self)
         self.frame_src.grid(row=1, column=0, padx=20, pady=10, sticky="ew")
         ctk.CTkEntry(self.frame_src, textvariable=self.source_path, placeholder_text="Source folder...").pack(side="left", fill="x", expand=True, padx=10)
-        ctk.CTkButton(self.frame_src, text="Source", width=100, fg_color=color_gris_boton, hover_color=color_gris_hover, command=self.select_source).pack(side="right", padx=10)
+        ctk.CTkButton(self.frame_src, text="Source", width=100, fg_color=self.color_gris_boton, hover_color=self.color_gris_hover, command=self.select_source).pack(side="right", padx=10)
 
         self.frame_dst = ctk.CTkFrame(self)
         self.frame_dst.grid(row=2, column=0, padx=20, pady=10, sticky="ew")
         ctk.CTkEntry(self.frame_dst, textvariable=self.dest_path, placeholder_text="Mirror folder...").pack(side="left", fill="x", expand=True, padx=10)
-        ctk.CTkButton(self.frame_dst, text="Destination", width=100, fg_color=color_gris_boton, hover_color=color_gris_hover, command=self.select_dest).pack(side="right", padx=10)
+        ctk.CTkButton(self.frame_dst, text="Destination", width=100, fg_color=self.color_gris_boton, hover_color=self.color_gris_hover, command=self.select_dest).pack(side="right", padx=10)
 
         self.frame_opt = ctk.CTkFrame(self)
         self.frame_opt.grid(row=3, column=0, padx=20, pady=10, sticky="ew")
-        ctk.CTkLabel(self.frame_opt, text="Output format:").pack(side="left", padx=20)
 
+        ctk.CTkLabel(self.frame_opt, text="Format:").grid(row=0, column=0, padx=10, pady=10)
         self.opt_menu = ctk.CTkOptionMenu(self.frame_opt, values=["MP3", "ALAC", "FLAC"], variable=self.format_var, 
-                                         fg_color=color_gris_boton, button_color=color_gris_boton, 
-                                         button_hover_color=color_gris_hover)
-        self.opt_menu.pack(side="right", padx=20)
+                                         fg_color=self.color_gris_boton, button_color=self.color_gris_boton, 
+                                         button_hover_color=self.color_gris_hover, command=self.update_ui_state)
+        self.opt_menu.grid(row=0, column=1, padx=5)
+
+        self.bitrate_label = ctk.CTkLabel(self.frame_opt, text="Quality:")
+        self.bitrate_label.grid(row=0, column=2, padx=10)
+        self.bitrate_menu = ctk.CTkOptionMenu(self.frame_opt, values=list(MP3_BITRATES.keys()), variable=self.bitrate_var,
+                                              fg_color=self.color_gris_boton, button_color=self.color_gris_boton, 
+                                              button_hover_color=self.color_gris_hover)
+        self.bitrate_menu.grid(row=0, column=3, padx=5)
+
+        ctk.CTkLabel(self.frame_opt, text="Speed:").grid(row=1, column=0, padx=10, pady=10)
+        self.cpu_switch = ctk.CTkSegmentedButton(self.frame_opt, values=["Normal", "Quick (100% CPU usage)"], 
+                                                 variable=self.cpu_mode, selected_color=self.color_gris_hover)
+        self.cpu_switch.grid(row=1, column=1, columnspan=3, padx=10, pady=10, sticky="ew")
 
         self.progress = ctk.CTkProgressBar(self, progress_color="#606060")
         self.progress.grid(row=4, column=0, padx=20, pady=20, sticky="ew")
@@ -121,10 +109,16 @@ class DuckvertGUI(ctk.CTk):
 
         self.btn_run = ctk.CTkButton(self, text="Convert", fg_color="#1f1f1f", hover_color="#111111", 
                                      border_width=1, border_color="#555555", command=self.start_conversion_thread)
-        self.btn_run.grid(row=5, column=0, pady=20)
+        self.btn_run.grid(row=5, column=0, pady=10)
 
         self.status_label = ctk.CTkLabel(self, text="")
         self.status_label.grid(row=6, column=0)
+
+    def update_ui_state(self, choice):
+        if choice == "MP3":
+            self.bitrate_menu.configure(state="normal")
+        else:
+            self.bitrate_menu.configure(state="disabled")
 
     def select_source(self):
         path = filedialog.askdirectory()
@@ -146,9 +140,7 @@ class DuckvertGUI(ctk.CTk):
         threading.Thread(target=self.run_conversion, daemon=True).start()
 
     def run_conversion(self):
-        src = self.source_path.get()
-        dst = self.dest_path.get()
-        fmt = self.format_var.get()
+        src, dst, fmt = self.source_path.get(), self.dest_path.get(), self.format_var.get()
 
         if not src or not dst:
             messagebox.showerror("Error", "Select source and destination folders")
@@ -157,31 +149,45 @@ class DuckvertGUI(ctk.CTk):
         self.btn_run.configure(state="disabled")
         self.status_label.configure(text="Scanning files...")
         
-        target_ext = FORMAT_CONFIG[fmt]["ext"]
-        target_args = FORMAT_CONFIG[fmt]["args"]
+        is_quick = self.cpu_mode.get() == "Quick (100%)"
         
+        if fmt == "MP3":
+            ext = "mp3"
+            bitrate_args = MP3_BITRATES[self.bitrate_var.get()]
+            target_args = ["-codec:a", "libmp3lame"] + bitrate_args + [
+                "-map_metadata", "0", "-id3v2_version", "3", "-c:v", "copy", "-map", "0:a", "-map", "0:v?"
+            ]
+        elif fmt == "ALAC":
+            ext = "m4a"
+            target_args = ["-codec:a", "alac", "-map_metadata", "0", "-c:v", "copy", "-disposition:v", "attached_pic", "-map", "0:a", "-map", "0:v?"]
+        else: # FLAC
+            ext = "flac"
+            target_args = ["-codec:a", "flac", "-map", "0:a", "-map", "0:v?"]
+
         tasks = []
         for root, dirs, files in os.walk(src):
             for file in files:
                 if file.lower().endswith(AUDIO_FILE_TYPES):
                     source_full_path = os.path.join(root, file)
                     rel_path = os.path.relpath(root, src)
-                    new_filename = os.path.splitext(file)[0] + f".{target_ext}"
+                    new_filename = os.path.splitext(file)[0] + f".{ext}"
                     dest_full_path = os.path.join(dst, rel_path, new_filename)
-                    tasks.append((source_full_path, dest_full_path, target_args))
+                    tasks.append((source_full_path, dest_full_path, target_args, is_quick))
 
         if not tasks:
             self.status_label.configure(text="No files found")
             self.btn_run.configure(state="normal")
             return
 
+        workers = cpu_count() if is_quick else 2
+
         start_time = time.time()
-        with ThreadPool(cpu_count()) as p:
+        with ThreadPool(workers) as p:
             count = 0
             for _ in p.imap_unordered(converttomp3, tasks):
                 count += 1
                 self.progress.set(count / len(tasks))
-                self.status_label.configure(text=f"Converting: {count}/{len(tasks)}")
+                self.status_label.configure(text=f"Converting: {count}/{len(tasks)} (Threads: {workers})")
 
         elapsed = time.time() - start_time
         self.status_label.configure(text=f"Completed in {elapsed:.2f}s!")
